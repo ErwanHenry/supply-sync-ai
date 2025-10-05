@@ -4,6 +4,7 @@ import { InventoryModule } from './modules/inventory/inventory.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { ERPModule } from './modules/erp/erp.module';
 import { AnomalyModule } from './modules/anomaly/anomaly.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 import { PrismaModule } from './common/prisma/prisma.module';
 import { RedisModule } from './common/redis/redis.module';
 import { QueueModule } from './common/queue/queue.module';
@@ -21,6 +22,7 @@ import { QueueModule } from './common/queue/queue.module';
     SyncModule,
     ERPModule,
     AnomalyModule,
+    WebhooksModule,
   ],
 })
 export class AppModule {}

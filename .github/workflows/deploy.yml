@@ -1,0 +1,197 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*.*.*'
+
+env:
+  NODE_VERSION: '18.x'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # Deploy Frontend to Vercel
+  deploy-frontend:
+    name: Deploy Frontend (Vercel)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Deploy to Vercel
+        working-directory: frontend
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID_FRONTEND }}
+        run: |
+          vercel pull --yes --environment=production --token=$VERCEL_TOKEN
+          vercel build --prod --token=$VERCEL_TOKEN
+          vercel deploy --prebuilt --prod --token=$VERCEL_TOKEN
+
+  # Deploy Backend to Cloud Run (GCP)
+  deploy-backend:
+    name: Deploy Backend (Cloud Run)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Authenticate Docker with GCR
+        run: gcloud auth configure-docker
+
+      - name: Build Docker image
+        working-directory: backend
+        run: |
+          docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-backend:${{ github.sha }} .
+          docker tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-backend:${{ github.sha }} \
+                     gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-backend:latest
+
+      - name: Push Docker image
+        run: |
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-backend:${{ github.sha }}
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-backend:latest
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy supplysync-backend \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-backend:${{ github.sha }} \
+            --platform managed \
+            --region europe-west1 \
+            --allow-unauthenticated \
+            --set-env-vars DATABASE_URL=${{ secrets.DATABASE_URL }} \
+            --set-env-vars REDIS_HOST=${{ secrets.REDIS_HOST }} \
+            --set-env-vars REDIS_PORT=${{ secrets.REDIS_PORT }}
+
+  # Deploy ML Service to Cloud Run
+  deploy-ml-service:
+    name: Deploy ML Service (Cloud Run)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          service_account_key: ${{ secrets.GCP_SA_KEY }}
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Authenticate Docker with GCR
+        run: gcloud auth configure-docker
+
+      - name: Build Docker image
+        working-directory: ml-service
+        run: |
+          docker build -t gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-ml:${{ github.sha }} .
+          docker tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-ml:${{ github.sha }} \
+                     gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-ml:latest
+
+      - name: Push Docker image
+        run: |
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-ml:${{ github.sha }}
+          docker push gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-ml:latest
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy supplysync-ml \
+            --image gcr.io/${{ secrets.GCP_PROJECT_ID }}/supplysync-ml:${{ github.sha }} \
+            --platform managed \
+            --region europe-west1 \
+            --allow-unauthenticated \
+            --memory 2Gi \
+            --cpu 2
+
+  # Run Database Migrations
+  run-migrations:
+    name: Run Database Migrations
+    runs-on: ubuntu-latest
+    needs: [deploy-backend]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Run Prisma migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma migrate deploy
+
+      - name: Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+
+  # Notify deployment status
+  notify-deployment:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-frontend, deploy-backend, deploy-ml-service, run-migrations]
+    if: always()
+
+    steps:
+      - name: Send Slack notification
+        if: success()
+        run: |
+          curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "✅ SupplySync AI deployed successfully to production",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*SupplySync AI - Production Deployment*\n\n✅ All services deployed successfully!\n\n• Frontend: Vercel\n• Backend: Cloud Run\n• ML Service: Cloud Run\n• Commit: `${{ github.sha }}`"
+                  }
+                }
+              ]
+            }'
+
+      - name: Send failure notification
+        if: failure()
+        run: |
+          curl -X POST ${{ secrets.SLACK_WEBHOOK_URL }} \
+            -H 'Content-Type: application/json' \
+            -d '{
+              "text": "❌ SupplySync AI deployment failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*SupplySync AI - Deployment Failed*\n\n❌ Deployment to production failed.\n\nPlease check GitHub Actions logs."
+                  }
+                }
+              ]
+            }'

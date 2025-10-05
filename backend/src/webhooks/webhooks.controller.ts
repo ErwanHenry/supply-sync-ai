@@ -10,6 +10,7 @@ import {
   Logger,
   Param,
 } from '@nestjs/common'
+import { ApiTags, ApiOperation, ApiResponse, ApiHeader, ApiBody } from '@nestjs/swagger'
 import { WebhooksService } from './webhooks.service'
 
 interface WebhookPayload {
@@ -18,6 +19,7 @@ interface WebhookPayload {
   timestamp: Date
 }
 
+@ApiTags('webhooks')
 @Controller('webhooks')
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name)
@@ -32,6 +34,38 @@ export class WebhooksController {
    */
   @Post('sap')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'SAP S/4HANA webhook handler',
+    description: 'Receives real-time inventory updates from SAP Event Mesh with HMAC-SHA256 signature verification',
+  })
+  @ApiHeader({
+    name: 'x-webhook-secret',
+    description: 'HMAC-SHA256 signature for payload verification',
+    required: true,
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        event: { type: 'string', example: 'sap.s4.beh.materialstock.v1.MaterialStock.Changed.v1' },
+        data: {
+          type: 'object',
+          properties: {
+            Material: { type: 'string', example: 'MAT-001' },
+            MaterialDescription: { type: 'string', example: 'Steel Pipes 2inch' },
+            QuantityInStock: { type: 'number', example: 150 },
+            PricePerUnit: { type: 'number', example: 29.99 },
+            Plant: { type: 'string', example: 'WH-01' },
+            Supplier: { type: 'string', example: 'SUP-123' },
+          },
+        },
+        timestamp: { type: 'string', format: 'date-time' },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Webhook processed successfully' })
+  @ApiResponse({ status: 401, description: 'Invalid signature' })
+  @ApiResponse({ status: 400, description: 'Bad request' })
   async handleSAPWebhook(
     @Body() payload: WebhookPayload,
     @Headers('x-webhook-secret') signature: string,

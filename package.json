@@ -1,0 +1,49 @@
+{
+  "name": "supply-sync-ai",
+  "version": "0.1.0",
+  "description": "B2B Inventory Truth Engine - AI-powered real-time ERP synchronization",
+  "private": true,
+  "author": "SupplySync AI Team",
+  "license": "PROPRIETARY",
+  "workspaces": [
+    "agents/*",
+    "backend",
+    "frontend",
+    "integrations/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:orchestrator\" \"npm run dev:backend\" \"npm run dev:frontend\" \"npm run dev:ml\"",
+    "dev:orchestrator": "npm run dev --workspace=agents/orchestrator",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:ml": "cd ml-service && uvicorn src.main:app --reload",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "clean": "npm run clean --workspaces && rm -rf node_modules",
+    "docker:build": "docker-compose build",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "db:migrate": "npm run db:migrate --workspace=backend",
+    "db:seed": "npm run db:seed --workspace=backend",
+    "agents:init": "npm run init --workspace=agents/orchestrator",
+    "agents:start": "npm run start --workspace=agents/orchestrator",
+    "agents:stop": "npm run stop --workspace=agents/orchestrator"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "prettier": "^3.1.1",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  }
+}

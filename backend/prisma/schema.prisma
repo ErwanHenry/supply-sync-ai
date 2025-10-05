@@ -1,0 +1,171 @@
+// SupplySync AI Database Schema
+// PostgreSQL + TimescaleDB for time-series data
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Core Models
+
+model Company {
+  id          String   @id @default(uuid())
+  name        String
+  domain      String   @unique
+  tier        String   @default("starter") // starter, growth, enterprise
+  status      String   @default("active") // active, suspended, churned
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  erpConnections ERPConnection[]
+  users          User[]
+  inventoryItems InventoryItem[]
+  syncLogs       SyncLog[]
+  anomalyAlerts  AnomalyAlert[]
+
+  @@map("companies")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  role      String   @default("user") // admin, user, viewer
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+model ERPConnection {
+  id            String   @id @default(uuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  erpType       String   // sap, oracle, dynamics365, netsuite, odoo
+  erpInstanceUrl String
+  credentials   Json     // Encrypted credentials
+  syncMethod    String   @default("webhook") // webhook, polling
+  pollInterval  Int?     @default(300000) // milliseconds (5 min default)
+  status        String   @default("connected") // connected, disconnected, error
+  lastSyncAt    DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  syncLogs      SyncLog[]
+
+  @@map("erp_connections")
+}
+
+model InventoryItem {
+  id          String   @id @default(uuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sku         String
+  name        String?
+  category    String?
+  quantity    Int
+  price       Decimal  @db.Decimal(10, 2)
+  supplierId  String?
+  warehouseId String?
+  lastSyncAt  DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  snapshots     InventorySnapshot[]
+  anomalyAlerts AnomalyAlert[]
+
+  @@unique([companyId, sku])
+  @@index([companyId, sku])
+  @@index([lastSyncAt])
+  @@map("inventory_items")
+}
+
+// TimescaleDB hypertable for time-series data
+model InventorySnapshot {
+  id            String        @id @default(uuid())
+  inventoryId   String
+  inventory     InventoryItem @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  quantity      Int
+  price         Decimal       @db.Decimal(10, 2)
+  changeRate    Float?        // % change from previous snapshot
+  timestamp     DateTime      @default(now())
+
+  @@index([inventoryId, timestamp])
+  @@map("inventory_snapshots")
+}
+
+model SyncLog {
+  id              String         @id @default(uuid())
+  companyId       String
+  company         Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  erpConnectionId String
+  erpConnection   ERPConnection  @relation(fields: [erpConnectionId], references: [id], onDelete: Cascade)
+  syncType        String         // full, incremental, webhook
+  status          String         // success, error, partial
+  itemsSynced     Int            @default(0)
+  errors          Json?
+  duration        Int?           // milliseconds
+  startedAt       DateTime
+  completedAt     DateTime?
+
+  @@index([companyId, startedAt])
+  @@map("sync_logs")
+}
+
+model AnomalyAlert {
+  id            String        @id @default(uuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  inventoryId   String?
+  inventory     InventoryItem? @relation(fields: [inventoryId], references: [id], onDelete: SetNull)
+  anomalyType   String        // price_spike, impossible_quantity, stock_jump, supplier_anomaly
+  severity      String        @default("medium") // low, medium, high, critical
+  confidence    Float         @db.DoublePrecision // 0.0 - 1.0 (ML model confidence)
+  description   String
+  metadata      Json?         // Additional context
+  status        String        @default("open") // open, investigating, resolved, false_positive
+  resolvedBy    String?
+  resolvedAt    DateTime?
+  createdAt     DateTime      @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([status, severity])
+  @@map("anomaly_alerts")
+}
+
+model PredictionModel {
+  id          String   @id @default(uuid())
+  modelType   String   // anomaly_detection, demand_forecast
+  version     String
+  framework   String   // tensorflow, prophet, lstm
+  accuracy    Float?   @db.DoublePrecision
+  parameters  Json
+  trainedAt   DateTime
+  deployedAt  DateTime?
+  status      String   @default("training") // training, deployed, deprecated
+
+  @@map("prediction_models")
+}
+
+model WebhookEvent {
+  id          String   @id @default(uuid())
+  erpType     String
+  eventType   String   // inventory_update, order_created, etc.
+  payload     Json
+  signature   String?  // For verification
+  processed   Boolean  @default(false)
+  processedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([processed, createdAt])
+  @@map("webhook_events")
+}

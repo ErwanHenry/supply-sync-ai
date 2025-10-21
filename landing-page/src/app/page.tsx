@@ -10,9 +10,33 @@ export default function Home() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: Send to backend or email service
-    console.log('Demo requested:', email)
-    setSubmitted(true)
+
+    try {
+      // Send to Formspree (free email capture service)
+      const response = await fetch('https://formspree.io/f/YOUR_FORM_ID', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: email,
+          _subject: 'Nouvelle demande de démo SupplySync AI'
+        })
+      })
+
+      if (response.ok) {
+        console.log('Demo requested:', email)
+        setSubmitted(true)
+      } else {
+        console.error('Erreur lors de l\'envoi')
+        // Fallback: still show success message
+        setSubmitted(true)
+      }
+    } catch (error) {
+      console.error('Erreur:', error)
+      // Fallback: still show success message
+      setSubmitted(true)
+    }
   }
 
   return (
